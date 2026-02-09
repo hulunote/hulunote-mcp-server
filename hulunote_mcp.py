@@ -1,17 +1,17 @@
 from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
+import os
 
 # Initialize FastMCP server
 mcp = FastMCP("hulunote")
 
 # Constants
-HULUNOTE_API_BASE = "https://your-hulunote-api-domain.com"  # 请替换为实际的API域名
-USER_AGENT = "hulunote-mcp/1.0"
+HULUNOTE_API_BASE = "https://www.hulunote.top"
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
 
-# 这里需要配置认证信息
-# 可以通过环境变量或配置文件读取
-API_TOKEN = ""  # 请设置你的API token
+# API Token - 从环境变量读取或直接设置
+API_TOKEN = os.getenv("HULUNOTE_API_TOKEN", "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpZCI6MSwicm9sZSI6Imh1bHVub3RlIiwiZXhwIjoxNzcyNDUxMDgyfQ.LVQdd2tWKuB1d3089lFiej1ezRhimvrmfyrhOuur1BE")
 
 async def make_hulunote_request(
     endpoint: str, 
@@ -21,11 +21,12 @@ async def make_hulunote_request(
     headers = {
         "User-Agent": USER_AGENT,
         "Content-Type": "application/json",
+        "X-Functor-Api-Token": API_TOKEN,
+        "Referer": "https://www.hulunote.top/",
+        "sec-ch-ua": '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"macOS"',
     }
-    
-    # 如果需要认证，添加认证头
-    if API_TOKEN:
-        headers["Authorization"] = f"Bearer {API_TOKEN}"
     
     url = f"{HULUNOTE_API_BASE}{endpoint}"
     
@@ -50,18 +51,31 @@ async def make_hulunote_request(
                 "message": f"An error occurred: {str(e)}"
             }
 
+def format_note(note: dict[str, Any]) -> str:
+    """Format a note object into a readable string."""
+    return f"""
+Title: {note.get('hulunote-notes/title', 'Untitled')}
+Note ID: {note.get('hulunote-notes/id', 'Unknown')}
+Database ID: {note.get('hulunote-notes/database-id', 'Unknown')}
+Root Nav ID: {note.get('hulunote-notes/root-nav-id', 'Unknown')}
+Created: {note.get('hulunote-notes/created-at', 'Unknown')}
+Updated: {note.get('hulunote-notes/updated-at', 'Unknown')}
+Public: {note.get('hulunote-notes/is-public', False)}
+Page Views: {note.get('hulunote-notes/pv', 0)}
+"""
+
 # ============ Note Management Tools ============
 
 @mcp.tool()
-async def create_note(database_id: str, title: str) -> str:
+async def create_note(database_name: str, title: str) -> str:
     """Create a new note in Hulunote.
 
     Args:
-        database_id: UUID of the database to create the note in
+        database_name: Name of the database to create the note in
         title: Title of the new note
     """
     data = {
-        "database_id": database_id,
+        "database-name": database_name,
         "title": title
     }
     
@@ -73,7 +87,7 @@ async def create_note(database_id: str, title: str) -> str:
     if result.get("error"):
         return f"Failed to create note: {result.get('message')}"
     
-    return f"Successfully created note: {title}\nNote ID: {result.get('note_id', 'Unknown')}"
+    return f"Successfully created note!\n{format_note(result)}"
 
 @mcp.tool()
 async def get_notes(database_id: str, page: int = 1, page_size: int = 20) -> str:
@@ -85,9 +99,9 @@ async def get_notes(database_id: str, page: int = 1, page_size: int = 20) -> str
         page_size: Number of notes per page (default: 20)
     """
     data = {
-        "database_id": database_id,
+        "database-id": database_id,
         "page": page,
-        "page_size": page_size
+        "page-size": page_size
     }
     
     result = await make_hulunote_request("/hulunote/get-note-list", data)
@@ -98,24 +112,21 @@ async def get_notes(database_id: str, page: int = 1, page_size: int = 20) -> str
     if result.get("error"):
         return f"Failed to fetch notes: {result.get('message')}"
     
-    notes = result.get("notes", [])
+    # 根据实际返回格式调整
+    notes = result.get("notes", result if isinstance(result, list) else [])
     if not notes:
         return f"No notes found on page {page}"
     
     # Format notes list
     formatted_notes = []
     for note in notes:
-        formatted_notes.append(
-            f"Title: {note.get('title', 'Untitled')}\n"
-            f"ID: {note.get('note_id', 'Unknown')}\n"
-            f"Created: {note.get('created_at', 'Unknown')}"
-        )
+        formatted_notes.append(format_note(note))
     
     total = result.get("total", len(notes))
-    header = f"Notes (Page {page}/{(total + page_size - 1) // page_size}, Total: {total})\n"
-    header += "=" * 50 + "\n\n"
+    header = f"Notes (Page {page}, Total: {total})\n"
+    header += "=" * 60 + "\n"
     
-    return header + "\n\n---\n\n".join(formatted_notes)
+    return header + "\n---\n".join(formatted_notes)
 
 @mcp.tool()
 async def get_all_notes(database_id: str) -> str:
@@ -125,7 +136,7 @@ async def get_all_notes(database_id: str) -> str:
         database_id: UUID of the database
     """
     data = {
-        "database_id": database_id
+        "database-id": database_id
     }
     
     result = await make_hulunote_request("/hulunote/get-all-note-list", data)
@@ -136,22 +147,19 @@ async def get_all_notes(database_id: str) -> str:
     if result.get("error"):
         return f"Failed to fetch notes: {result.get('message')}"
     
-    notes = result.get("notes", [])
+    notes = result.get("notes", result if isinstance(result, list) else [])
     if not notes:
         return "No notes found in this database"
     
     # Format notes list
     formatted_notes = []
     for note in notes:
-        formatted_notes.append(
-            f"Title: {note.get('title', 'Untitled')}\n"
-            f"ID: {note.get('note_id', 'Unknown')}"
-        )
+        formatted_notes.append(format_note(note))
     
     header = f"All Notes (Total: {len(notes)})\n"
-    header += "=" * 50 + "\n\n"
+    header += "=" * 60 + "\n"
     
-    return header + "\n\n---\n\n".join(formatted_notes)
+    return header + "\n---\n".join(formatted_notes)
 
 @mcp.tool()
 async def update_note(
@@ -166,14 +174,14 @@ async def update_note(
         title: New title (optional)
         content: New content (optional)
     """
-    data = {"note_id": note_id}
+    data = {"note-id": note_id}
     
     if title is not None:
         data["title"] = title
     if content is not None:
         data["content"] = content
     
-    if len(data) == 1:  # Only note_id provided
+    if len(data) == 1:  # Only note-id provided
         return "Please provide at least a title or content to update"
     
     result = await make_hulunote_request("/hulunote/update-hulunote-note", data)
@@ -210,10 +218,10 @@ async def create_or_update_nav(
         parent_id: UUID of the parent node (None for root level)
     """
     data = {
-        "note_id": note_id,
-        "nav_id": nav_id,
+        "note-id": note_id,
+        "nav-id": nav_id,
         "content": content,
-        "parent_id": parent_id
+        "parent-id": parent_id
     }
     
     result = await make_hulunote_request("/hulunote/create-or-update-nav", data)
@@ -235,7 +243,7 @@ async def get_note_navigation(note_id: str) -> str:
         note_id: UUID of the note
     """
     data = {
-        "note_id": note_id
+        "note-id": note_id
     }
     
     result = await make_hulunote_request("/hulunote/get-note-navs", data)
@@ -246,24 +254,26 @@ async def get_note_navigation(note_id: str) -> str:
     if result.get("error"):
         return f"Failed to fetch navigation nodes: {result.get('message')}"
     
-    nodes = result.get("navs", [])
+    nodes = result.get("navs", result if isinstance(result, list) else [])
     if not nodes:
         return f"No navigation nodes found for note {note_id}"
     
     # Format navigation tree
     formatted_nodes = []
     for node in nodes:
-        parent_info = f"Parent: {node.get('parent_id')}" if node.get('parent_id') else "Root Level"
+        parent_id = node.get('hulunote-navs/parent-id') or node.get('parent-id')
+        parent_info = f"Parent: {parent_id}" if parent_id else "Root Level"
+        
         formatted_nodes.append(
-            f"Nav ID: {node.get('nav_id', 'Unknown')}\n"
-            f"Content: {node.get('content', 'No content')}\n"
+            f"Nav ID: {node.get('hulunote-navs/id') or node.get('nav-id', 'Unknown')}\n"
+            f"Content: {node.get('hulunote-navs/content') or node.get('content', 'No content')}\n"
             f"{parent_info}"
         )
     
     header = f"Navigation Outline for Note {note_id} (Total: {len(nodes)})\n"
-    header += "=" * 50 + "\n\n"
+    header += "=" * 60 + "\n"
     
-    return header + "\n\n---\n\n".join(formatted_nodes)
+    return header + "\n---\n".join(formatted_nodes)
 
 @mcp.tool()
 async def get_all_navigation_nodes(
@@ -279,9 +289,9 @@ async def get_all_navigation_nodes(
         page_size: Number of nodes per page (default: 100)
     """
     data = {
-        "database_id": database_id,
+        "database-id": database_id,
         "page": page,
-        "page_size": page_size
+        "page-size": page_size
     }
     
     result = await make_hulunote_request("/hulunote/get-all-nav-by-page", data)
@@ -292,7 +302,7 @@ async def get_all_navigation_nodes(
     if result.get("error"):
         return f"Failed to fetch navigation nodes: {result.get('message')}"
     
-    nodes = result.get("navs", [])
+    nodes = result.get("navs", result if isinstance(result, list) else [])
     if not nodes:
         return f"No navigation nodes found on page {page}"
     
@@ -300,17 +310,17 @@ async def get_all_navigation_nodes(
     formatted_nodes = []
     for node in nodes:
         formatted_nodes.append(
-            f"Nav ID: {node.get('nav_id', 'Unknown')}\n"
-            f"Note ID: {node.get('note_id', 'Unknown')}\n"
-            f"Content: {node.get('content', 'No content')}\n"
-            f"Parent: {node.get('parent_id', 'Root')}"
+            f"Nav ID: {node.get('hulunote-navs/id') or node.get('nav-id', 'Unknown')}\n"
+            f"Note ID: {node.get('hulunote-navs/note-id') or node.get('note-id', 'Unknown')}\n"
+            f"Content: {node.get('hulunote-navs/content') or node.get('content', 'No content')}\n"
+            f"Parent: {node.get('hulunote-navs/parent-id') or node.get('parent-id', 'Root')}"
         )
     
     total = result.get("total", len(nodes))
-    header = f"Navigation Nodes (Page {page}/{(total + page_size - 1) // page_size}, Total: {total})\n"
-    header += "=" * 50 + "\n\n"
+    header = f"Navigation Nodes (Page {page}, Total: {total})\n"
+    header += "=" * 60 + "\n"
     
-    return header + "\n\n---\n\n".join(formatted_nodes)
+    return header + "\n---\n".join(formatted_nodes)
 
 if __name__ == "__main__":
     # Initialize and run the server
