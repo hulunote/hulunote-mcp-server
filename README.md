@@ -41,7 +41,7 @@ This MCP server allows Claude to interact with Hulunote's knowledge base, enabli
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/hulunote-mcp-server.git
+git clone https://github.com/hulunote/hulunote-mcp-server.git
 cd hulunote-mcp-server
 ```
 
